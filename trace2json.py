@@ -12,6 +12,7 @@ class EventItem():
         self.eventname = ''
         self.dev = ''
         self.engine = ''
+        self.ring = ''  # old trace log has ring info, but no engine info
         self.hw_id = ''
         self.ctx = ''
         self.seqno = ''
@@ -34,12 +35,15 @@ class EventItem():
     def parse(self, line):
         seg = line.split()
         self.process = seg[0].strip()
-        self.pname, self.pid = self.process.rsplit('-', 1)
+        self.pid = self.process.split('-')[-1]
+        pname_end = len(self.process) - len(self.pid) - 1
+        self.pname = self.process[0 : pname_end]
         self.cpu = seg[1][1:-1]
         self.timestamp = int(seg[2][:-1].replace('.', ''))
         self.eventname = seg[3][:-1]
         self.dev = self.getValue('dev')
         self.engine = self.getValue('engine')
+        self.ring = self.getValue('ring')
         self.hw_id = self.getValue('hw_id')
         self.ctx = self.getValue('ctx')
         self.seqno = self.getValue('seqno')
@@ -48,6 +52,8 @@ class EventItem():
         self.gemobj = self.getValue('obj')
         self.gemsize = self.getValue('size')
         self.freq = self.getValue('new_freq')
+        if self.ring != '' and self.engine == '':
+            self.engine = self.ring + ':0'
         self.setMeta()
 
     def setMeta(self):
@@ -239,12 +245,63 @@ def removeDuplicatedSeqno(el):
     for r in removed:
         el.remove(r)
 
+def buildJsonMemory(tdb, outjson):
+    ecount = 0
+    graphname = "GEM memory usage"
+    arg = '{"name":"' + 'Memory' + '"}'
+    pid, tid = '5', '0'
+    gproc = EventMeta('process_name', pid, tid, arg)
+    gthread = EventMeta('thread_name', pid, tid, arg)
+    gsort = EventMeta('process_sort_index', pid, tid, '{"sort_index":"' + pid + '"}')
+    outjson.append(gproc.toString())
+    outjson.append(gthread.toString())
+    outjson.append(gsort.toString())
+    mem_count = 0
+    gem_create = tdb.getEventsByName('i915_gem_object_create')
+    for ec in gem_create:
+        mem_count = mem_count + int(ec.gemsize, 0)
+        c = EventC(graphname, pid, tid, str(ec.timestamp), str(mem_count))
+        outjson.append(c.toString())
+        ecount = ecount + 1
+
+    gem_destroy = tdb.getEventsByName('i915_gem_object_destroy')
+    for ed in gem_destroy:
+        dsize = '0x0'
+        for ec in gem_create:
+            if ed.gemobj == ec.gemobj:
+                dsize = ec.gemsize;
+                break
+        mem_count = mem_count - int(dsize, 0)
+        c = EventC(graphname, pid, tid, str(ed.timestamp), str(mem_count))
+        outjson.append(c.toString())
+        ecount = ecount + 1
+    print('build json for memory... done!', ecount)
+
+def buildJsonGpuFreqency(tdb, outjson):
+    ecount = 0
+    graphname = "GPU frequency"
+    arg = '{"name":"' + 'GpuFreq' + '"}'
+    pid, tid = '6', '0'
+    gproc = EventMeta('process_name', pid, tid, arg)
+    gthread = EventMeta('thread_name', pid, tid, arg)
+    gsort = EventMeta('process_sort_index', pid, tid, '{"sort_index":"' + pid + '"}')
+    outjson.append(gproc.toString())
+    outjson.append(gthread.toString())
+    outjson.append(gsort.toString())
+    gpufreq = tdb.getEventsByName('intel_gpu_freq_change')
+    for e in gpufreq:
+        c = EventC(graphname, pid, tid, str(e.timestamp), e.freq)
+        outjson.append(c.toString())
+        ecount = ecount + 1
+    print('build json for GPU frequency... done!', ecount)
+
 def buildJsonProc(tdb, outjson):
+    ecount = 0
     for p in tdb.procs:
         arg = '{"name":"' + p + '"}'
-        pid = p.split('-')[1]
-        if pid == '0':
-            pid = '20'
+        pid = p.split('-')[-1]
+        if pid == '0'or pid == '1':
+            pid = '2' + pid
         tid = '0'
         gproc = EventMeta('process_name', pid, tid, arg)
         gthread = EventMeta('thread_name', pid, tid, arg)
@@ -255,9 +312,11 @@ def buildJsonProc(tdb, outjson):
         for e in tdb.getEventsByProc(p):
             gevent = EventX(e.eventname, pid, tid, str(e.timestamp), "1", e.metastring)
             outjson.append(gevent.toString())
-    print('build json for process... done!')
+            ecount = ecount + 1
+    print('build json for process... done!', ecount)
 
 def buildJsonEngine(tdb, outjson):
+    ecount = 0
     for engine in tdb.engines:
         engineName = {'0':'Render', '1':'BLT', '2':'VDBOX', '3':'VEBOX', '4':'CCS'}
         pid, tid = engine.split(':')
@@ -286,6 +345,7 @@ def buildJsonEngine(tdb, outjson):
                     dur = o.timestamp - i.timestamp
                     g = EventX(name, pid, tid, str(i.timestamp), str(dur), i.metastring)
                     outjson.append(g.toString())
+                    ecount = ecount + 1
                     prev_seqno = i.seqno
                     elo.remove(o)
                     break
@@ -295,16 +355,18 @@ def buildJsonEngine(tdb, outjson):
                 dur = 10
                 g = EventX(name, pid, tid, str(i.timestamp), str(dur), i.metastring)
                 outjson.append(g.toString())
-    print('build json for engine... done!')
+                ecount = ecount + 1
+    print('build json for engine... done!', ecount)
 
 def buildJsonContext(tdb, outjson):
+    ecount = 0
     for p in tdb.procs:
         ctxs = tdb.getCtxsByProc(p)
         elqueue = tdb.getEventsByNameAndProc('i915_request_queue', p)
         elretire = tdb.getEventsByName('i915_request_retire')
         if len(elqueue) == 0:
             continue
-        pid = p.split('-')[1]
+        pid = p.split('-')[-1]
         for c in ctxs:
             tid = c
             argThread = '{"name":"' + 'GPU Context ' + c + '"}'
@@ -314,55 +376,11 @@ def buildJsonContext(tdb, outjson):
                 if e.ctx == c:
                     gevent = EventX(e.seqno, pid, tid, str(e.timestamp), "10", e.metastring)
                     outjson.append(gevent.toString())
-    print('build json for context done!')
-
-def buildJsonMemory(tdb, outjson):
-    mem_count = 0
-    graphname = "GEM memory usage"
-    arg = '{"name":"' + 'Memory' + '"}'
-    pid, tid = '5', '0'
-    gproc = EventMeta('process_name', pid, tid, arg)
-    gthread = EventMeta('thread_name', pid, tid, arg)
-    gsort = EventMeta('process_sort_index', pid, tid, '{"sort_index":"' + pid + '"}')
-    outjson.append(gproc.toString())
-    outjson.append(gthread.toString())
-    outjson.append(gsort.toString())
-
-    gem_create = tdb.getEventsByName('i915_gem_object_create')
-    for ec in gem_create:
-        mem_count = mem_count + int(ec.gemsize, 0)
-        c = EventC(graphname, pid, tid, str(ec.timestamp), str(mem_count))
-        outjson.append(c.toString())
-
-    gem_destroy = tdb.getEventsByName('i915_gem_object_destroy')
-    for ed in gem_destroy:
-        dsize = '0x0'
-        for ec in gem_create:
-            if ed.gemobj == ec.gemobj:
-                dsize = ec.gemsize;
-                break
-        mem_count = mem_count - int(dsize, 0)
-        c = EventC(graphname, pid, tid, str(ed.timestamp), str(mem_count))
-        outjson.append(c.toString())
-    print('build json for memory... done!')
-
-def buildJsonGpuFreqency(tdb, outjson):
-    graphname = "GPU frequency"
-    arg = '{"name":"' + 'GpuFreq' + '"}'
-    pid, tid = '6', '0'
-    gproc = EventMeta('process_name', pid, tid, arg)
-    gthread = EventMeta('thread_name', pid, tid, arg)
-    gsort = EventMeta('process_sort_index', pid, tid, '{"sort_index":"' + pid + '"}')
-    outjson.append(gproc.toString())
-    outjson.append(gthread.toString())
-    outjson.append(gsort.toString())
-    gpufreq = tdb.getEventsByName('intel_gpu_freq_change')
-    for e in gpufreq:
-        c = EventC(graphname, pid, tid, str(e.timestamp), e.freq)
-        outjson.append(c.toString())
-    print('build json for GPU frequency... done!')
+                    ecount = ecount + 1
+    print('build json for context done!', ecount)
 
 def buildJsonRequest(tag, tdb, outjson):
+    ecount = 0
     req_dict = {"queue":"10", "add":"11", "submit":"12", "execute":"13", "in":"14", "out":"15", "retire":"16"}
     if tag not in req_dict.keys():
         return
@@ -386,12 +404,13 @@ def buildJsonRequest(tag, tdb, outjson):
             outjson.append(gsort.toString())
         g = EventX(e.seqno, pid, tid, str(e.timestamp), "10", e.metastring)
         outjson.append(g.toString())
-    print('build json for ' + tag + '... done!')
+        ecount = ecount + 1
+    print('build json for ' + tag + '... done!', ecount)
 
 if __name__ == "__main__":
     cmd_opt = {"-a":0}
     if len(sys.argv) == 1:
-        logfile = "F:\\trace.log"
+        logfile = "F:\\vaocl_full2.log"
     if len(sys.argv) == 2:
         logfile = sys.argv[1]
     elif len(sys.argv) == 3:
@@ -403,18 +422,18 @@ if __name__ == "__main__":
 
     outjson = []
     tdb = TraceDB(logfile)
-    tdb.initalize()
-    print('structuralize trace log... done!')
+    num = tdb.initalize()
+    print('structuralize trace log... done!', num)
 
     buildJsonProc(tdb, outjson)
     buildJsonEngine(tdb, outjson)
     buildJsonContext(tdb, outjson)
     buildJsonMemory(tdb, outjson)
     buildJsonGpuFreqency(tdb, outjson)
+    buildJsonRequest('queue', tdb, outjson)
     buildJsonRequest('submit', tdb, outjson)
 
     if cmd_opt['-a'] == 1:
-        buildJsonRequest('queue', tdb, outjson)
         buildJsonRequest('add', tdb, outjson)
         buildJsonRequest('execute', tdb, outjson)
         buildJsonRequest('in', tdb, outjson)
