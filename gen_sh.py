@@ -1,6 +1,6 @@
 import os
 
-tracefile = "trace_cmd.sh"
+tracefile = "trace.sh"
 logfile = 'tmp.log'
 cmd = 'sudo trace-cmd list | grep i915 >' + logfile
 os.system(cmd)
@@ -12,9 +12,11 @@ os.system('rm ' + logfile)
 tracesh = []
 tracesh.append('sudo trace-cmd record \\\n')
 for l in lines:
-    c = '-e "' + l.strip() + '" \\\n'
+    if l == lines[-1]:
+        c = '-e "' + l.strip() + '" \n'
+    else:
+        c = '-e "' + l.strip() + '" \\\n'
     tracesh.append(c)
-tracesh.append('sleep $1\n')
 
 with open(tracefile, "w") as f:
     for i in tracesh:
