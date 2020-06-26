@@ -407,19 +407,7 @@ def buildJsonRequest(tag, tdb, outjson):
         ecount = ecount + 1
     print('build json for ' + tag + '... done!', ecount)
 
-if __name__ == "__main__":
-    cmd_opt = {"-a":0}
-    if len(sys.argv) == 1:
-        logfile = "F:\\vaocl_full2.log"
-    if len(sys.argv) == 2:
-        logfile = sys.argv[1]
-    elif len(sys.argv) == 3:
-        logfile = sys.argv[1]
-        if sys.argv[2] == "-a":
-            cmd_opt['-a'] = 1
-    else:
-        print("ERROR: Invalid command arguments!")
-
+def execute(logfile, cmd_opt = {"-a":0}):
     outjson = []
     tdb = TraceDB(logfile)
     num = tdb.initalize()
@@ -443,4 +431,21 @@ if __name__ == "__main__":
     with open(logfile.split('.')[0]+'.json', 'wt') as f:
         f.writelines('[\n')
         f.writelines(outjson)
+    print('execution finished!')
+
+if __name__ == "__main__":
+    cmd_opt = {"-a":0}
+    if len(sys.argv) == 1:
+        logfile = "F:\\vaocl_full2.log"
+    if len(sys.argv) == 2:
+        logfile = sys.argv[1]
+    elif len(sys.argv) == 3:
+        logfile = sys.argv[1]
+        if sys.argv[2] == "-a":
+            cmd_opt['-a'] = 1
+    else:
+        print("ERROR: Invalid command arguments!")
+
+    execute(logfile, cmd_opt)
+
     print('execution finished!')
