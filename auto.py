@@ -5,7 +5,7 @@ import trace2json
 import time
 
 app_cmd = 'ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi -i ~/test.264 -f null -'
-app_cmd = 'h264encode'
+#app_cmd = 'h264encode'
 
 logfile = 'tmp.log'
 cmd = 'sudo trace-cmd list | grep i915 >' + logfile
@@ -16,7 +16,7 @@ with open(logfile, 'rt') as f:
 os.system('rm ' + logfile)
 
 trace_cmd = ''
-trace_cmd += 'sudo trace-cmd record '
+trace_cmd += 'sudo trace-cmd start '
 for l in lines:
     if l == lines[-1]:
         c = '-e "' + l.strip() + '"'
@@ -24,21 +24,27 @@ for l in lines:
         c = '-e "' + l.strip() + '" '
     trace_cmd += c
 trace_cmdlist = trace_cmd.split(' ') 
-print(trace_cmdlist)
 
 with open('trace.sh', 'wt') as f:
     f.writelines(trace_cmd)
 os.system('chmod +x trace.sh')
 
-trace_proc = subprocess.Popen(trace_cmdlist, shell=True)
+os.system('sudo trace-cmd reset')
+os.system(trace_cmd)
+
+#trace_proc = subprocess.Popen(trace_cmdlist, shell=True)
 
 os.system(app_cmd)
-time.sleep(10)
-trace_proc.terminate()
+
+os.system('sudo trace-cmd stop')
+os.system('sudo trace-cmd extract -o trace.dat')
+os.system('sudo trace-cmd reset')
+
+#trace_proc.terminate()
 #os.kill(trace_proc.pid, signal.SIGINT)
 
 drm_logfile = 'drm.log'
-trace_report = 'trace-cmd report >' + drm_logfile
+trace_report = 'trace-cmd report trace.dat >' + drm_logfile
 os.system(trace_report)
 
 trace2json.execute(drm_logfile)
