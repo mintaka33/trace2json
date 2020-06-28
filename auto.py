@@ -1,8 +1,13 @@
 import os
+import sys
 import trace2json
 
-#app_cmd = 'ffmpeg -hwaccel vaapi -hwaccel_output_format vaapi -i ~/test.264 -f null -'
-app_cmd = 'h264encode'
+if len(sys.argv) == 2:
+    app_cmd = sys.argv[1]
+    if '.sh' in app_cmd:
+        app_cmd = './' + app_cmd
+else:
+    app_cmd = 'h264encode'
 
 logfile = 'tmp.log'
 cmd = 'sudo trace-cmd list | grep i915 >' + logfile
