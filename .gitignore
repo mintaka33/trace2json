@@ -1,4 +1,7 @@
 __pycache__
 .vscode
 test
-
+*.json
+*.log
+*.dat
+trace.sh
